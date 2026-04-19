@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ':*)",
+      "Bash(python -m yt_dlp --cookies cookies.txt --no-playlist --socket-timeout 30 --retries 1 --simulate \"https://www.instagram.com/p/C7WV9_TI5dT/\")"
+    ]
+  }
+}

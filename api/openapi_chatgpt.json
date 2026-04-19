@@ -1,0 +1,290 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Viral Video DB API",
+    "description": "API para generar guiones de video viral basados en el análisis de 1,000+ videos virales reales. Genera guiones completos con hook, tomas, producción, edición y publicación.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Servidor local (ejecutar: uvicorn api.main:app --port 8000)"
+    }
+  ],
+  "paths": {
+    "/stats": {
+      "get": {
+        "operationId": "getStats",
+        "summary": "Estadísticas de la base de datos",
+        "description": "Devuelve el número total de hooks virales, cuántos han sido analizados con IA, y cuántas ideas generadas hay en el historial.",
+        "responses": {
+          "200": {
+            "description": "Estadísticas de la BD",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total_hooks": {"type": "integer"},
+                    "hooks_analizados": {"type": "integer"},
+                    "hooks_pendientes": {"type": "integer"},
+                    "analisis_guardados": {"type": "integer"},
+                    "ideas_generadas": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/nichos": {
+      "get": {
+        "operationId": "getNichos",
+        "summary": "Lista los nichos de mercado disponibles",
+        "description": "Devuelve todos los nichos de mercado disponibles en la base de datos (fitness, finanzas, salud, etc.) con el número de videos analizados en cada uno.",
+        "responses": {
+          "200": {
+            "description": "Lista de nichos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "nicho": {"type": "string"},
+                      "total_videos": {"type": "integer"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/patrones": {
+      "get": {
+        "operationId": "getPatrones",
+        "summary": "Lista los patrones virales disponibles",
+        "description": "Devuelve todos los patrones virales disponibles (antes/después, tutorial, ranking, historia personal, etc.) con su frecuencia en la base de datos.",
+        "responses": {
+          "200": {
+            "description": "Lista de patrones virales",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "patron": {"type": "string"},
+                      "total_videos": {"type": "integer"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/generate": {
+      "post": {
+        "operationId": "generateVideoScript",
+        "summary": "⭐ Genera un guion completo de video viral",
+        "description": "Endpoint principal. Recibe el contexto de la empresa y el objetivo, busca los mejores videos de referencia en la base de datos y genera un guion COMPLETO con hook, guion, plan de tomas, producción, edición, publicación y URL de referencia viral.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["empresa", "objetivo"],
+                "properties": {
+                  "empresa": {
+                    "type": "string",
+                    "description": "Descripción completa de la empresa. Incluye: qué venden, dónde están, a quién van dirigidos, precio aproximado si es relevante.",
+                    "example": "Clínica dental en Madrid especializada en ortodoncia invisible Invisalign. Precios desde 2.500€. Público: adultos 25-45 años."
+                  },
+                  "objetivo": {
+                    "type": "string",
+                    "description": "Objetivo específico del video: qué acción debe realizar el espectador.",
+                    "example": "Conseguir leads de personas interesadas en alineadores invisibles que rellenen el formulario de consulta gratuita"
+                  },
+                  "plataforma": {
+                    "type": "string",
+                    "description": "Plataforma destino del video",
+                    "enum": ["Instagram Reels", "TikTok", "YouTube Shorts"],
+                    "default": "Instagram Reels"
+                  },
+                  "nicho": {
+                    "type": "string",
+                    "description": "Nicho de mercado para filtrar referencias (opcional). Ej: salud, fitness, finanzas, tecnología, educación",
+                    "nullable": true
+                  },
+                  "patron_viral": {
+                    "type": "string",
+                    "description": "Patrón viral preferido (opcional). Ej: antes/después, tutorial, ranking, historia personal, tip rápido",
+                    "nullable": true
+                  },
+                  "num_referencias": {
+                    "type": "integer",
+                    "description": "Número de videos virales de referencia a analizar para generar el guion",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 5
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Guion completo generado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "idea_id": {"type": "integer", "description": "ID del guion en el historial"},
+                    "generado_en": {"type": "string", "format": "date-time"},
+                    "inputs": {
+                      "type": "object",
+                      "properties": {
+                        "empresa": {"type": "string"},
+                        "objetivo": {"type": "string"},
+                        "plataforma": {"type": "string"}
+                      }
+                    },
+                    "referencias_usadas": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {"type": "integer"},
+                          "url": {"type": "string"},
+                          "hook": {"type": "string"},
+                          "nicho": {"type": "string"},
+                          "patron": {"type": "string"}
+                        }
+                      }
+                    },
+                    "guion": {
+                      "type": "object",
+                      "description": "Guion completo generado con todos los detalles de producción"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No se encontraron referencias en la base de datos"
+          },
+          "500": {
+            "description": "Error en la generación (API key no configurada, etc.)"
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "operationId": "searchReferences",
+        "summary": "Busca referencias virales sin generar guion",
+        "description": "Busca los videos virales más relevantes para el contexto dado, sin generar un guion. Útil para explorar qué referencias hay disponibles antes de generar.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Texto de búsqueda (empresa, producto, objetivo)"
+                  },
+                  "nicho": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "patron_viral": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Referencias encontradas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total_encontradas": {"type": "integer"},
+                    "referencias": {"type": "array", "items": {"type": "object"}}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ideas": {
+      "get": {
+        "operationId": "listIdeas",
+        "summary": "Historial de guiones generados",
+        "description": "Devuelve el historial de todos los guiones de video generados previamente.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {"type": "integer", "default": 20, "maximum": 100},
+            "description": "Número máximo de ideas a devolver"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista de guiones del historial"
+          }
+        }
+      }
+    },
+    "/ideas/{idea_id}": {
+      "get": {
+        "operationId": "getIdea",
+        "summary": "Obtiene un guion específico del historial",
+        "parameters": [
+          {
+            "name": "idea_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "integer"},
+            "description": "ID del guion a recuperar"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Guion completo"
+          },
+          "404": {
+            "description": "Idea no encontrada"
+          }
+        }
+      }
+    }
+  }
+}

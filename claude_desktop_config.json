@@ -1,0 +1,15 @@
+{
+  "_instrucciones": "Copia el bloque 'mcpServers' y pégalo en tu claude_desktop_config.json",
+  "_ubicacion_windows": "C:\\Users\\TU_USUARIO\\AppData\\Roaming\\Claude\\claude_desktop_config.json",
+  "_ubicacion_mac": "~/Library/Application Support/Claude/claude_desktop_config.json",
+
+  "mcpServers": {
+    "viral-video-db": {
+      "command": "python",
+      "args": ["c:/xampp/htdocs/claude/rrss ideas/mcp_server/server.py"],
+      "env": {
+        "PYTHONPATH": "c:/xampp/htdocs/claude/rrss ideas"
+      }
+    }
+  }
+}
