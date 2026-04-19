@@ -3,12 +3,16 @@ Configuración central del sistema Viral Video DB.
 Edita este archivo con tus API keys antes de usar el sistema.
 """
 import os
+from dotenv import load_dotenv
+
+# Cargar variables de entorno desde el archivo .env
+load_dotenv()
 
 # =============================================================
-# API KEYS - Cámbialas por las tuyas
+# API KEYS - Definir en tu archivo .env
 # =============================================================
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDgV8xNr6b1D9nDY546HKtMWp-e2VvKFLs")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_GEMINI_API_KEY_AQUI")
 # Obtén tu key en: https://aistudio.google.com/app/apikey
 
 # =============================================================
@@ -17,10 +21,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDgV8xNr6b1D9nDY546HKtMW
 # Obtén tus credenciales en: Supabase Dashboard → Settings → API
 # Usa la SERVICE ROLE key (no la anon key) para acceso completo desde scripts
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://skeubwnxmectbzadprfr.supabase.co")
-# Ejemplo: https://xyzabc.supabase.co
-
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNrZXVid254bWVjdGJ6YWRwcmZyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzQ5ODU2MiwiZXhwIjoyMDg5MDc0NTYyfQ.q4r7X44p21gEfZkC2Cyw98c1q1u5g9PIHCuOAKfIB-M")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://xyzabc.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "TU_SUPABASE_SERVICE_ROLE_KEY")
 # Usa la "service_role" key para acceso sin restricciones desde el backend
 
 # =============================================================
