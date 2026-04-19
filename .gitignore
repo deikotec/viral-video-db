@@ -1,0 +1,21 @@
+# Videos descargados
+videos/
+
+# Bases de datos locales
+*.db
+viral_videos.db
+*.sqlite3
+
+# Python y entornos virtuales
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.env
+
+# Archivos de prueba
+scratch_mcp.py
+
+# Directorios de configuracion local
+.claude/
