@@ -29,7 +29,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "TU_SUPABASE_SERVICE_ROLE_KEY")
 # RUTAS DEL SISTEMA
 # =============================================================
 
-BASE_DIR = "c:/xampp/htdocs/claude/rrss ideas"
+BASE_DIR = "c:/xampp/htdocs/viral-video"
 VIDEOS_DIR = f"{BASE_DIR}/videos"
 HOOKS_JSON = f"{BASE_DIR}/hooks_data.json"
 

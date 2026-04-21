@@ -112,9 +112,9 @@ pip install mcp
   "mcpServers": {
     "viral-video-db": {
       "command": "python",
-      "args": ["c:/xampp/htdocs/claude/rrss ideas/mcp_server/server.py"],
+      "args": ["c:/xampp/htdocs/viral-video/mcp_server/server.py"],
       "env": {
-        "PYTHONPATH": "c:/xampp/htdocs/claude/rrss ideas"
+        "PYTHONPATH": "c:/xampp/htdocs/viral-video"
       }
     }
   }
