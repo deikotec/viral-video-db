@@ -51,44 +51,58 @@ def get_available_patrones(db):
     return [(r['patron_viral'], r['total']) for r in result.data]
 
 
-def search_relevant_hooks(db, nicho=None, patron=None, num_refs=5):
+def _score_hook(hook: dict, keywords: list) -> int:
+    """Puntúa un hook por relevancia al contexto de empresa+objetivo."""
+    score = 0
+    a = hook.get('analisis') or {}
+    viral = a.get('estrategia_viral', {}) if isinstance(a, dict) else {}
+    fields = [
+        (hook.get('nicho') or '', 5),
+        (hook.get('audiencia') or '', 4),
+        (viral.get('audiencia_objetivo') or '', 4),
+        (hook.get('por_que_viral') or '', 3),
+        (viral.get('por_que_es_viral') or '', 3),
+        (hook.get('hook_template') or '', 2),
+        (str((a.get('guion') or {}).get('texto_completo') or '')[:300], 1),
+    ]
+    for text, weight in fields:
+        text_lower = text.lower()
+        for kw in keywords:
+            if kw in text_lower:
+                score += weight
+    return score
+
+
+def search_relevant_hooks(db, company_context='', nicho=None, patron=None, num_refs=5):
     """
-    Busca los hooks/análisis más relevantes para el contexto de la empresa.
-    Usa RPC con ORDER BY RANDOM() y filtros opcionales.
+    Busca los hooks más relevantes. Descarga más candidatos de los necesarios
+    y los ordena por relevancia semántica al contexto de la empresa.
     """
-    # Verificar si hay análisis disponibles
     count_result = db.table('video_analysis').select('id', count='exact').limit(0).execute()
     num_analyzed = count_result.count or 0
 
     if num_analyzed == 0:
-        # Sin análisis: usar hooks crudos del PDF
         print("ℹ️  No hay videos analizados aún. Usando hooks del PDF como referencia base.")
         result = db.rpc('get_random_hooks', {'p_limit': num_refs * 3}).execute()
-        hooks_data = [
+        return [
             {'id': r['id'], 'hook_template': r['hook_template'],
              'url': r['reference_url'], 'analisis': None}
             for r in result.data
-        ]
-        return hooks_data[:num_refs]
+        ][:num_refs]
 
-    # Búsqueda con filtros y orden aleatorio via RPC
-    params = {
-        'p_nicho':  nicho,
-        'p_patron': patron,
-        'p_limit':  num_refs * 3,
-    }
-    result = db.rpc('search_hooks_random', params).execute()
-    rows = result.data
+    fetch_limit = max(num_refs * 6, 30)
+    params = {'p_nicho': nicho, 'p_patron': patron, 'p_limit': fetch_limit}
+    rows = db.rpc('search_hooks_random', params).execute().data
 
     if not rows and (nicho or patron):
-        # Si no hay resultados con filtros, relajar la búsqueda
         print("ℹ️  No se encontraron análisis con esos filtros. Usando todos disponibles.")
-        result = db.rpc('search_hooks_random', {'p_nicho': None, 'p_patron': None, 'p_limit': num_refs * 3}).execute()
-        rows = result.data
+        rows = db.rpc('search_hooks_random', {'p_nicho': None, 'p_patron': None, 'p_limit': fetch_limit}).execute().data
+
+    stop = {'de', 'en', 'la', 'el', 'los', 'las', 'un', 'una', 'que', 'con', 'para', 'por', 'del'}
+    keywords = [w for w in company_context.lower().split() if len(w) > 3 and w not in stop]
 
     hooks_data = []
     for r in rows:
-        # analisis_json_completo ya es un dict (JSONB en Supabase, no necesita json.loads)
         hooks_data.append({
             'id':            r['id'],
             'hook_template': r['hook_template'],
@@ -101,41 +115,92 @@ def search_relevant_hooks(db, nicho=None, patron=None, num_refs=5):
             'audiencia':     r.get('audiencia_objetivo'),
         })
 
+    if keywords:
+        hooks_data.sort(key=lambda h: _score_hook(h, keywords), reverse=True)
+
     return hooks_data[:num_refs]
 
 
 def format_references_for_prompt(hooks_data):
-    """Formatea los videos de referencia para incluirlos en el prompt"""
+    """Formatea los videos de referencia con análisis completo para el prompt."""
     refs = []
 
     for i, hook in enumerate(hooks_data, 1):
-        ref = f"\n--- REFERENCIA #{i} ---"
+        ref = f"\n{'='*50}"
+        ref += f"\nREFERENCIA #{i}"
+        ref += f"\n{'='*50}"
         ref += f"\nHook template: {hook['hook_template']}"
-        ref += f"\nURL de referencia: {hook.get('url', 'N/A')}"
+        ref += f"\n⚠️  URL DEL VIDEO ORIGINAL: {hook.get('url', 'N/A')}"
 
-        if hook.get('analisis'):
-            a = hook['analisis']
-            estrategia = a.get('estrategia_viral', {})
-            guion      = a.get('guion', {})
-            hook_data  = a.get('hook', {})
-            prod       = a.get('produccion', {})
-            audio      = a.get('audio', {})
+        a = hook.get('analisis')
+        if a:
+            viral     = a.get('estrategia_viral', {})
+            guion     = a.get('guion', {})
+            hook_data = a.get('hook', {})
+            prod      = a.get('produccion', {})
+            audio     = a.get('audio', {})
             estructura = a.get('estructura_narrativa', {})
+            rep       = a.get('replicabilidad', {})
+            tomas     = a.get('tomas_y_planos', [])
 
-            ref += f"\nNicho: {estrategia.get('nicho', 'N/A')}"
-            ref += f"\nPatrón viral: {estrategia.get('patron_viral', 'N/A')}"
-            ref += f"\nPor qué es viral: {estrategia.get('por_que_es_viral', 'N/A')}"
-            ref += f"\nEmoción principal: {estrategia.get('emocion_principal', 'N/A')}"
-            ref += f"\nAudiencia: {estrategia.get('audiencia_objetivo', 'N/A')}"
-            ref += f"\nHook visual: {hook_data.get('elemento_visual_hook', 'N/A')}"
-            ref += f"\nTécnica hook: {hook_data.get('tecnica', 'N/A')}"
+            ref += f"\n\n[ESTRATEGIA VIRAL]"
+            ref += f"\nNicho: {viral.get('nicho', 'N/A')}"
+            ref += f"\nPatrón viral: {viral.get('patron_viral', 'N/A')}"
+            ref += f"\nPor qué es viral: {viral.get('por_que_es_viral', 'N/A')}"
+            ref += f"\nFactor de compartir: {viral.get('factor_compartir', 'N/A')}"
+            ref += f"\nEmoción principal: {viral.get('emocion_principal', 'N/A')}"
+            ref += f"\nAudiencia objetivo: {viral.get('audiencia_objetivo', 'N/A')}"
+
+            ref += f"\n\n[HOOK]"
+            ref += f"\nTipo: {hook_data.get('tipo', 'N/A')}"
+            ref += f"\nTexto del hook: {hook_data.get('texto_hook', 'N/A')}"
+            ref += f"\nDuración hook: {hook_data.get('duracion_hook_segundos', 'N/A')}s"
+            ref += f"\nTécnica: {hook_data.get('tecnica', 'N/A')}"
+            ref += f"\nElemento visual: {hook_data.get('elemento_visual_hook', 'N/A')}"
+
+            ref += f"\n\n[ESTRUCTURA NARRATIVA]"
             ref += f"\nRitmo: {estructura.get('ritmo', 'N/A')}"
+            ref += f"\nDensidad información: {estructura.get('densidad_informacion', 'N/A')}"
+            ref += f"\nArco emocional: {estructura.get('arco_emocional', 'N/A')}"
+            partes = estructura.get('partes', [])
+            if partes:
+                ref += f"\nEstructura ({len(partes)} partes):"
+                for p in partes[:4]:
+                    ref += f"\n  - {p.get('nombre','?')} ({p.get('duracion_segundos','?')}s): {p.get('descripcion','')}"
+
+            ref += f"\n\n[PRODUCCIÓN]"
             ref += f"\nEscenario: {prod.get('escenario', 'N/A')}"
             ref += f"\nIluminación: {prod.get('iluminacion', 'N/A')}"
-            ref += f"\nMúsica: {audio.get('musica', {}).get('genero', 'N/A')}"
-            ref += f"\nGuion (extracto): {str(guion.get('texto_completo', 'N/A'))[:200]}..."
+            ref += f"\nCalidad video: {prod.get('calidad_video', 'N/A')}"
+            ref += f"\nSubtítulos: {prod.get('subtitulos', 'N/A')}"
+            ref += f"\nTransiciones: {prod.get('transiciones', 'N/A')}"
+
+            ref += f"\n\n[AUDIO]"
+            musica = audio.get('musica', {})
+            ref += f"\nMúsica género: {musica.get('genero', 'N/A')}"
+            ref += f"\nMúsica propósito: {musica.get('proposito', 'N/A')}"
+            ref += f"\nTono de voz: {audio.get('tono_voz', 'N/A')}"
+
+            if tomas:
+                ref += f"\n\n[TOMAS — {len(tomas)} planos]"
+                for t in tomas[:5]:
+                    ref += f"\n  {t.get('tipo_plano','?')} | {t.get('angulo','?')} | {t.get('duracion_aprox','?')} — {t.get('proposito','')}"
+
+            guion_texto = str(guion.get('texto_completo', ''))
+            if guion_texto and guion_texto != 'N/A':
+                ref += f"\n\n[GUION COMPLETO]"
+                ref += f"\n{guion_texto[:600]}{'...' if len(guion_texto) > 600 else ''}"
+                ref += f"\nEstilo escritura: {guion.get('estilo_escritura', 'N/A')}"
+                ref += f"\nCTA usado: {guion.get('call_to_action', 'N/A')}"
+
+            ref += f"\n\n[REPLICABILIDAD]"
+            ref += f"\nDificultad: {rep.get('nivel_dificultad', 'N/A')}"
+            ref += f"\nCosto: {rep.get('costo_produccion', 'N/A')}"
+            nichos_compat = rep.get('nichos_compatibles', [])
+            if nichos_compat:
+                ref += f"\nNichos compatibles: {', '.join(nichos_compat)}"
         else:
-            ref += "\n(Sin análisis detallado - video pendiente de análisis)"
+            ref += "\n(Sin análisis detallado — video pendiente de análisis)"
 
         refs.append(ref)
 
@@ -188,73 +253,122 @@ def save_idea_to_db(db, company_context, video_objective, platform, hooks_used, 
 
 
 def print_idea_pretty(idea):
-    """Imprime la idea de video de forma legible"""
-    print("\n" + "🎬" * 30)
-    print("   IDEA DE VIDEO GENERADA")
-    print("🎬" * 30)
+    """Imprime la idea de video con todos los campos del nuevo prompt."""
+    sep = "━" * 60
+    print(f"\n{sep}")
+    print("   🎬  GUION VIRAL GENERADO")
+    print(sep)
 
     if "respuesta_texto" in idea:
         print(idea["respuesta_texto"])
         return
 
     print(f"\n📌 CONCEPTO: {idea.get('titulo_concepto', 'N/A')}")
-    print(f"⚡ HOOK PRINCIPAL: \"{idea.get('hook_principal', 'N/A')}\"")
-    print(f"\n💡 POR QUÉ FUNCIONARÁ:")
-    print(f"   {idea.get('por_que_funcionara', 'N/A')}")
+    print(f"⚡ HOOK:     \"{idea.get('hook_principal', 'N/A')}\"")
 
     ref = idea.get('referencia_viral', {})
-    print(f"\n🔗 REFERENCIA VIRAL:")
-    print(f"   Patrón: {ref.get('patron', 'N/A')}")
-    print(f"   URL:    {ref.get('url', 'N/A')}")
+    print(f"\n🔗 REFERENCIA VIRAL BASE")
+    print(f"   Patrón aplicado:  {ref.get('patron', 'N/A')}")
+    print(f"   URL del original: {ref.get('url', 'N/A')}")
+    print(f"   Por qué elegida:  {ref.get('por_que_elegida', 'N/A')}")
+    print(f"   Elementos usados: {ref.get('elementos_adaptados', 'N/A')}")
+
+    print(f"\n💡 POR QUÉ FUNCIONARÁ")
+    print(f"   {idea.get('por_que_funcionara', 'N/A')}")
 
     guion = idea.get('guion_completo', {})
-    print(f"\n📝 GUION COMPLETO:")
-    print(f"   [0-3s HOOK]:    {guion.get('hook_0_3seg', 'N/A')}")
-    print(f"   [DESARROLLO]:   {guion.get('desarrollo', 'N/A')}")
-    print(f"   [CIERRE/CTA]:   {guion.get('cierre_cta', 'N/A')}")
+    print(f"\n📝 GUION COMPLETO")
+    print(f"   [0-3s  HOOK]:        {guion.get('hook_0_3seg', 'N/A')}")
+    print(f"   [3-20s DESARROLLO]:  {guion.get('desarrollo_3_20seg', guion.get('desarrollo', 'N/A'))}")
+    print(f"   [20-27s CUERPO]:     {guion.get('cuerpo_20_27seg', 'N/A')}")
+    print(f"   [CIERRE/CTA]:        {guion.get('cierre_cta', 'N/A')}")
+    texto_completo = guion.get('texto_completo', '')
+    if texto_completo:
+        print(f"\n   ── TEXTO COMPLETO (listo para leer en cámara) ──")
+        print(f"   {texto_completo}")
 
     tomas = idea.get('plan_de_tomas', [])
     if tomas:
-        print(f"\n🎥 PLAN DE TOMAS ({len(tomas)} tomas):")
-        for toma in tomas:
-            print(f"   Toma {toma.get('numero', '?')}: {toma.get('descripcion', 'N/A')}")
-            print(f"          Plano: {toma.get('tipo_plano', 'N/A')} | Duración: {toma.get('duracion', 'N/A')}")
-            print(f"          Nota: {toma.get('notas_direccion', 'N/A')}")
+        print(f"\n🎥 PLAN DE TOMAS ({len(tomas)} tomas)")
+        for t in tomas:
+            print(f"   Toma {t.get('numero','?')} [{t.get('timestamp', t.get('duracion',''))}]  {t.get('descripcion', 'N/A')}")
+            print(f"          Plano: {t.get('tipo_plano','N/A')} | Ángulo: {t.get('angulo_camara','N/A')} | Mov: {t.get('movimiento','N/A')}")
+            if t.get('dialogo_en_toma'):
+                print(f"          Diálogo: \"{t['dialogo_en_toma']}\"")
+            print(f"          ➜ {t.get('notas_director', t.get('notas_direccion', 'N/A'))}")
 
     prod = idea.get('produccion', {})
-    print(f"\n🎬 PRODUCCIÓN:")
-    print(f"   Duración total: {prod.get('duracion_total', 'N/A')}")
-    print(f"   Formato:        {prod.get('formato', 'N/A')}")
-    print(f"   Escenario:      {prod.get('escenario', 'N/A')}")
-    print(f"   Iluminación:    {prod.get('iluminacion', 'N/A')}")
-    print(f"   Props/Vestuario:{prod.get('vestuario_props', 'N/A')}")
-    print(f"   Música:         {prod.get('musica_sugerida', 'N/A')}")
-    print(f"   Subtítulos:     {prod.get('subtitulos', 'N/A')}")
+    print(f"\n🎬 PRODUCCIÓN")
+    print(f"   Duración:    {prod.get('duracion_total', 'N/A')} | Formato: {prod.get('formato', 'N/A')}")
+    print(f"   Escenario:   {prod.get('escenario', 'N/A')}")
+    print(f"   Iluminación: {prod.get('iluminacion', 'N/A')}")
+    print(f"   Vestuario:   {prod.get('vestuario', prod.get('vestuario_props', 'N/A'))}")
+    print(f"   Props:       {prod.get('props', 'N/A')}")
+    print(f"   🎵 Música:   {prod.get('musica_sugerida', 'N/A')}")
+    print(f"   Vol. música: {prod.get('volumen_musica', 'N/A')}")
+    print(f"   Subtítulos:  {prod.get('subtitulos', 'N/A')}")
+    if prod.get('texto_en_pantalla'):
+        print(f"   Texto pantalla: {prod['texto_en_pantalla']}")
 
     edicion = idea.get('edicion', {})
-    print(f"\n✂️  EDICIÓN:")
-    print(f"   Ritmo:          {edicion.get('ritmo', 'N/A')}")
-    print(f"   Transiciones:   {edicion.get('transiciones', 'N/A')}")
-    print(f"   Color:          {edicion.get('color', 'N/A')}")
+    print(f"\n✂️  EDICIÓN")
+    print(f"   Ritmo:        {edicion.get('ritmo', 'N/A')}")
+    print(f"   Transiciones: {edicion.get('transiciones', 'N/A')}")
+    print(f"   Color:        {edicion.get('color_grading', edicion.get('color', 'N/A'))}")
+    print(f"   Efectos:      {edicion.get('efectos_especiales', 'N/A')}")
     tools = edicion.get('herramientas_sugeridas', [])
     if tools:
-        print(f"   Herramientas:   {', '.join(tools)}")
+        print(f"   Herramientas: {', '.join(tools)}")
+    tips = edicion.get('tips_edicion', [])
+    if tips:
+        print("   Tips:")
+        for tip in tips:
+            print(f"     • {tip}")
 
     pub = idea.get('estrategia_publicacion', {})
-    print(f"\n📱 PUBLICACIÓN:")
-    print(f"   Mejor horario:  {pub.get('mejor_horario', 'N/A')}")
-    print(f"   Caption:")
-    print(f"   {pub.get('caption_sugerido', 'N/A')}")
     hashtags = pub.get('hashtags', [])
+    print(f"\n📱 ESTRATEGIA DE PUBLICACIÓN")
+    print(f"   Horario:     {pub.get('mejor_horario', 'N/A')}")
+    print(f"   CTA caption: {pub.get('cta_caption', 'N/A')}")
+    print(f"\n   ── CAPTION (listo para copiar) ──")
+    print(f"   {pub.get('caption_sugerido', 'N/A')}")
     if hashtags:
-        print(f"   Hashtags: {' '.join(hashtags)}")
+        print(f"\n   Hashtags: {' '.join(hashtags)}")
+    if pub.get('primer_comentario'):
+        print(f"   Primer comentario: {pub['primer_comentario']}")
+    if pub.get('estrategia_primeras_horas'):
+        print(f"   Estrategia primeras horas: {pub['estrategia_primeras_horas']}")
+
+    variaciones = idea.get('variaciones_ab', [])
+    if variaciones:
+        print(f"\n🔀 VARIACIONES A/B PARA TESTEAR")
+        for v in variaciones:
+            print(f"   {v.get('nombre', 'Variación')}")
+            print(f"   Hook alternativo: \"{v.get('hook_alternativo', 'N/A')}\"")
+            print(f"   Diferencia: {v.get('diferencia_clave', 'N/A')}")
 
     metricas = idea.get('metricas_objetivo', {})
-    print(f"\n📊 MÉTRICAS OBJETIVO:")
+    print(f"\n📊 MÉTRICAS OBJETIVO")
     print(f"   KPI principal:  {metricas.get('kpi_principal', 'N/A')}")
+    print(f"   KPI secundario: {metricas.get('kpi_secundario', 'N/A')}")
     print(f"   Expectativa:    {metricas.get('expectativa_realista', 'N/A')}")
+    print(f"   Señales 24h:    {metricas.get('senales_exito_24h', 'N/A')}")
+    if metricas.get('cuando_reutilizar'):
+        print(f"   Reutilizar si:  {metricas['cuando_reutilizar']}")
 
-    print("\n" + "🎬" * 30)
+    checklist = idea.get('checklist_preproduccion', [])
+    if checklist:
+        print(f"\n✅ CHECKLIST ANTES DE GRABAR")
+        for item in checklist:
+            print(f"   ☐ {item}")
+
+    errores = idea.get('errores_frecuentes', [])
+    if errores:
+        print(f"\n⚠️  ERRORES FRECUENTES A EVITAR")
+        for err in errores:
+            print(f"   ✗ {err}")
+
+    print(f"\n{sep}")
 
 
 def interactive_mode():
@@ -351,7 +465,7 @@ def main():
     print(f"\n🔍 Buscando referencias virales relevantes en Supabase...")
 
     # Buscar hooks relevantes
-    hooks_data = search_relevant_hooks(db, nicho, patron, args.num_refs)
+    hooks_data = search_relevant_hooks(db, company_context, nicho, patron, args.num_refs)
 
     if not hooks_data:
         print("❌ No se encontraron referencias. Asegúrate de tener la BD con datos.")

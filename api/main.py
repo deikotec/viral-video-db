@@ -108,7 +108,29 @@ def get_stats_data(db):
         }
 
 
-def search_references(db, nicho=None, patron=None, num_refs=5):
+def _score_ref(ref: dict, keywords: list) -> int:
+    """Puntúa una referencia por relevancia al contexto de la empresa."""
+    score = 0
+    a = ref.get('analisis') or {}
+    viral = a.get('estrategia_viral', {}) if isinstance(a, dict) else {}
+    fields = [
+        (ref.get('nicho') or '', 5),
+        (ref.get('audiencia') or '', 4),
+        (viral.get('audiencia_objetivo') or '', 4),
+        (ref.get('por_que_viral') or '', 3),
+        (viral.get('por_que_es_viral') or '', 3),
+        (ref.get('hook_template') or '', 2),
+        (str((a.get('guion') or {}).get('texto_completo') or '')[:300], 1),
+    ]
+    for text, weight in fields:
+        text_lower = text.lower()
+        for kw in keywords:
+            if kw in text_lower:
+                score += weight
+    return score
+
+
+def search_references(db, empresa: str = '', nicho=None, patron=None, num_refs=5):
     count = db.table('video_analysis').select('id', count='exact').limit(0).execute().count or 0
 
     if count == 0:
@@ -120,27 +142,34 @@ def search_references(db, nicho=None, patron=None, num_refs=5):
             for r in result.data
         ][:num_refs]
 
-    params = {'p_nicho': nicho, 'p_patron': patron, 'p_limit': num_refs * 3}
+    fetch_limit = max(num_refs * 6, 30)
+    params = {'p_nicho': nicho, 'p_patron': patron, 'p_limit': fetch_limit}
     rows = db.rpc('search_hooks_random', params).execute().data
 
     if not rows and (nicho or patron):
-        params = {'p_nicho': None, 'p_patron': None, 'p_limit': num_refs * 3}
-        rows = db.rpc('search_hooks_random', params).execute().data
+        rows = db.rpc('search_hooks_random', {'p_nicho': None, 'p_patron': None, 'p_limit': fetch_limit}).execute().data
+
+    stop = {'de', 'en', 'la', 'el', 'los', 'las', 'un', 'una', 'que', 'con', 'para', 'por', 'del'}
+    keywords = [w for w in empresa.lower().split() if len(w) > 3 and w not in stop]
 
     result = []
     for r in rows:
+        an = r.get('analisis_json_completo') or {}
         result.append({
             'id':           r['id'],
             'hook_template':r['hook_template'],
             'url':          r['reference_url'],
-            'titulo':       r.get('analisis_json_completo', {}).get('titulo_descriptivo') if r.get('analisis_json_completo') else None,
+            'titulo':       an.get('titulo_descriptivo') if isinstance(an, dict) else None,
             'nicho':        r.get('nicho'),
             'patron_viral': r.get('patron_viral'),
             'por_que_viral':r.get('por_que_es_viral'),
             'emocion':      r.get('emocion_principal'),
             'audiencia':    r.get('audiencia_objetivo'),
-            'analisis':     r.get('analisis_json_completo'),  # ya es dict (JSONB)
+            'analisis':     an,
         })
+
+    if keywords:
+        result.sort(key=lambda r: _score_ref(r, keywords), reverse=True)
 
     return result[:num_refs]
 
@@ -148,28 +177,79 @@ def search_references(db, nicho=None, patron=None, num_refs=5):
 def format_references_for_prompt(hooks_data):
     refs = []
     for i, hook in enumerate(hooks_data, 1):
-        ref = f"\n--- REFERENCIA #{i} ---"
+        ref = f"\n{'='*50}"
+        ref += f"\nREFERENCIA #{i}"
+        ref += f"\n{'='*50}"
         ref += f"\nHook template: {hook['hook_template']}"
-        ref += f"\nURL referencia: {hook.get('url', 'N/A')}"
-        if hook.get("analisis"):
-            a = hook["analisis"]
-            viral     = a.get("estrategia_viral", {})
-            guion     = a.get("guion", {})
-            h         = a.get("hook", {})
-            prod      = a.get("produccion", {})
-            audio     = a.get("audio", {})
+        ref += f"\n⚠️  URL DEL VIDEO ORIGINAL: {hook.get('url', 'N/A')}"
+
+        a = hook.get("analisis")
+        if a:
+            viral      = a.get("estrategia_viral", {})
+            guion      = a.get("guion", {})
+            h_data     = a.get("hook", {})
+            prod       = a.get("produccion", {})
+            audio      = a.get("audio", {})
             estructura = a.get("estructura_narrativa", {})
+            rep        = a.get("replicabilidad", {})
+            tomas      = a.get("tomas_y_planos", [])
+
+            ref += f"\n\n[ESTRATEGIA VIRAL]"
             ref += f"\nNicho: {viral.get('nicho', 'N/A')}"
             ref += f"\nPatrón viral: {viral.get('patron_viral', 'N/A')}"
             ref += f"\nPor qué es viral: {viral.get('por_que_es_viral', 'N/A')}"
-            ref += f"\nEmoción: {viral.get('emocion_principal', 'N/A')}"
-            ref += f"\nAudiencia: {viral.get('audiencia_objetivo', 'N/A')}"
-            ref += f"\nHook visual: {h.get('elemento_visual_hook', 'N/A')}"
-            ref += f"\nTécnica hook: {h.get('tecnica', 'N/A')}"
+            ref += f"\nFactor de compartir: {viral.get('factor_compartir', 'N/A')}"
+            ref += f"\nEmoción principal: {viral.get('emocion_principal', 'N/A')}"
+            ref += f"\nAudiencia objetivo: {viral.get('audiencia_objetivo', 'N/A')}"
+
+            ref += f"\n\n[HOOK]"
+            ref += f"\nTipo: {h_data.get('tipo', 'N/A')}"
+            ref += f"\nTexto del hook: {h_data.get('texto_hook', 'N/A')}"
+            ref += f"\nDuración: {h_data.get('duracion_hook_segundos', 'N/A')}s"
+            ref += f"\nTécnica: {h_data.get('tecnica', 'N/A')}"
+            ref += f"\nElemento visual: {h_data.get('elemento_visual_hook', 'N/A')}"
+
+            ref += f"\n\n[ESTRUCTURA NARRATIVA]"
             ref += f"\nRitmo: {estructura.get('ritmo', 'N/A')}"
+            ref += f"\nDensidad info: {estructura.get('densidad_informacion', 'N/A')}"
+            ref += f"\nArco emocional: {estructura.get('arco_emocional', 'N/A')}"
+            partes = estructura.get("partes", [])
+            if partes:
+                ref += f"\nEstructura ({len(partes)} partes):"
+                for p in partes[:4]:
+                    ref += f"\n  - {p.get('nombre','?')} ({p.get('duracion_segundos','?')}s): {p.get('descripcion','')}"
+
+            ref += f"\n\n[PRODUCCIÓN]"
             ref += f"\nEscenario: {prod.get('escenario', 'N/A')}"
-            ref += f"\nMúsica: {audio.get('musica', {}).get('genero', 'N/A')}"
-            ref += f"\nGuion (extracto): {str(guion.get('texto_completo', 'N/A'))[:200]}..."
+            ref += f"\nIluminación: {prod.get('iluminacion', 'N/A')}"
+            ref += f"\nCalidad video: {prod.get('calidad_video', 'N/A')}"
+            ref += f"\nSubtítulos: {prod.get('subtitulos', 'N/A')}"
+            ref += f"\nTransiciones: {prod.get('transiciones', 'N/A')}"
+
+            ref += f"\n\n[AUDIO]"
+            musica = audio.get("musica", {})
+            ref += f"\nMúsica género: {musica.get('genero', 'N/A')}"
+            ref += f"\nMúsica propósito: {musica.get('proposito', 'N/A')}"
+            ref += f"\nTono de voz: {audio.get('tono_voz', 'N/A')}"
+
+            if tomas:
+                ref += f"\n\n[TOMAS — {len(tomas)} planos]"
+                for t in tomas[:5]:
+                    ref += f"\n  {t.get('tipo_plano','?')} | {t.get('angulo','?')} | {t.get('duracion_aprox','?')} — {t.get('proposito','')}"
+
+            guion_texto = str(guion.get("texto_completo", ""))
+            if guion_texto and guion_texto != "N/A":
+                ref += f"\n\n[GUION COMPLETO]"
+                ref += f"\n{guion_texto[:600]}{'...' if len(guion_texto) > 600 else ''}"
+                ref += f"\nEstilo escritura: {guion.get('estilo_escritura', 'N/A')}"
+                ref += f"\nCTA usado: {guion.get('call_to_action', 'N/A')}"
+
+            ref += f"\n\n[REPLICABILIDAD]"
+            ref += f"\nDificultad: {rep.get('nivel_dificultad', 'N/A')}"
+            ref += f"\nCosto: {rep.get('costo_produccion', 'N/A')}"
+            nichos_compat = rep.get('nichos_compatibles', [])
+            if nichos_compat:
+                ref += f"\nNichos compatibles: {', '.join(nichos_compat)}"
         else:
             ref += "\n(Hook sin análisis detallado — video pendiente de análisis)"
         refs.append(ref)
@@ -277,7 +357,7 @@ def generate(req: GenerateRequest):
     """
     db = get_supabase()
 
-    hooks = search_references(db, req.nicho, req.patron_viral, min(req.num_referencias, 10))
+    hooks = search_references(db, req.empresa, req.nicho, req.patron_viral, min(req.num_referencias, 10))
 
     if not hooks:
         raise HTTPException(status_code=404, detail="No se encontraron referencias en la BD.")
