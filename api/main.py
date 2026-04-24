@@ -83,6 +83,19 @@ class SearchRequest(BaseModel):
     limit: int = 10
 
 
+class StatsUpdate(BaseModel):
+    reproducciones: Optional[int] = None
+    """Número de reproducciones del video original"""
+    me_gusta: Optional[int] = None
+    """Número de me gusta (likes)"""
+    comentarios: Optional[int] = None
+    """Número de comentarios"""
+    guardados: Optional[int] = None
+    """Número de veces guardado"""
+    compartidos: Optional[int] = None
+    """Número de veces compartido"""
+
+
 # -------------------------------------------------------
 # Helpers de BD (Supabase)
 # -------------------------------------------------------
@@ -155,6 +168,13 @@ def search_references(db, empresa: str = '', nicho=None, patron=None, num_refs=5
     result = []
     for r in rows:
         an = r.get('analisis_json_completo') or {}
+        stats = {
+            'reproducciones': r.get('reproducciones'),
+            'me_gusta':       r.get('me_gusta'),
+            'comentarios':    r.get('comentarios'),
+            'guardados':      r.get('guardados'),
+            'compartidos':    r.get('compartidos'),
+        }
         result.append({
             'id':           r['id'],
             'hook_template':r['hook_template'],
@@ -165,6 +185,7 @@ def search_references(db, empresa: str = '', nicho=None, patron=None, num_refs=5
             'por_que_viral':r.get('por_que_es_viral'),
             'emocion':      r.get('emocion_principal'),
             'audiencia':    r.get('audiencia_objetivo'),
+            'stats':        stats if any(v is not None for v in stats.values()) else None,
             'analisis':     an,
         })
 
@@ -306,14 +327,15 @@ def root():
             "1,000+ videos virales. Base de datos: Supabase."
         ),
         "endpoints": {
-            "GET  /stats":          "Estadísticas de la base de datos",
-            "GET  /nichos":         "Nichos disponibles en la BD",
-            "GET  /patrones":       "Patrones virales disponibles",
-            "POST /generate":       "⭐ Generar guion completo de video viral",
-            "POST /search":         "Buscar referencias virales sin generar guion",
-            "GET  /ideas":          "Historial de guiones generados",
-            "GET  /ideas/{id}":     "Ver un guion específico",
-            "GET  /system-prompt":  "System prompt para configurar cualquier IA",
+            "GET  /stats":              "Estadísticas de la base de datos",
+            "GET  /nichos":             "Nichos disponibles en la BD",
+            "GET  /patrones":           "Patrones virales disponibles",
+            "POST /generate":           "⭐ Generar guion completo de video viral",
+            "POST /search":             "Buscar referencias virales sin generar guion",
+            "GET  /ideas":              "Historial de guiones generados",
+            "GET  /ideas/{id}":         "Ver un guion específico",
+            "PUT  /hooks/{id}/stats":   "Actualizar estadísticas de un hook (views, likes...)",
+            "GET  /system-prompt":      "System prompt para configurar cualquier IA",
         },
         "docs": "/docs",
     }
@@ -411,6 +433,30 @@ def list_ideas(limit: int = Query(20, le=100)):
         }
         for r in result.data
     ]
+
+
+@app.put("/hooks/{hook_id}/stats", summary="Actualizar estadísticas de un hook")
+def update_hook_stats(hook_id: int, stats: StatsUpdate):
+    """
+    Guarda las estadísticas del video original de Instagram para un hook.
+    Solo se actualizan los campos que se envíen (los demás quedan igual).
+    """
+    db = get_supabase()
+    data = {k: v for k, v in stats.model_dump().items() if v is not None}
+    if not data:
+        raise HTTPException(status_code=400, detail="No se proporcionaron estadísticas para actualizar")
+    data['stats_updated_at'] = datetime.now().isoformat()
+
+    result = db.table('hooks').update(data).eq('id', hook_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail=f"Hook #{hook_id} no encontrado")
+
+    return {
+        "ok": True,
+        "hook_id": hook_id,
+        "stats_actualizadas": {k: v for k, v in data.items() if k != 'stats_updated_at'},
+        "actualizado_en": data['stats_updated_at'],
+    }
 
 
 @app.get("/ideas/{idea_id}", summary="Ver un guion específico del historial")

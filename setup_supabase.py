@@ -34,7 +34,14 @@ CREATE TABLE IF NOT EXISTS hooks (
     download_error  TEXT,
     analysis_error  TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
-    analyzed_at     TIMESTAMPTZ
+    analyzed_at     TIMESTAMPTZ,
+    -- Estadísticas del video original en Instagram
+    reproducciones  BIGINT DEFAULT NULL,
+    me_gusta        BIGINT DEFAULT NULL,
+    comentarios     BIGINT DEFAULT NULL,
+    guardados       BIGINT DEFAULT NULL,
+    compartidos     BIGINT DEFAULT NULL,
+    stats_updated_at TIMESTAMPTZ DEFAULT NULL
 );
 
 -- Tabla: análisis completo de cada video (uno por hook)
@@ -143,7 +150,12 @@ RETURNS TABLE(
     patron_viral           TEXT,
     por_que_es_viral       TEXT,
     emocion_principal      TEXT,
-    audiencia_objetivo     TEXT
+    audiencia_objetivo     TEXT,
+    reproducciones         BIGINT,
+    me_gusta               BIGINT,
+    comentarios            BIGINT,
+    guardados              BIGINT,
+    compartidos            BIGINT
 )
 LANGUAGE plpgsql SECURITY DEFINER
 AS $$
@@ -158,7 +170,12 @@ BEGIN
         va.patron_viral,
         va.por_que_es_viral,
         va.emocion_principal,
-        va.audiencia_objetivo
+        va.audiencia_objetivo,
+        h.reproducciones,
+        h.me_gusta,
+        h.comentarios,
+        h.guardados,
+        h.compartidos
     FROM hooks h
     JOIN video_analysis va ON h.id = va.hook_id
     WHERE (p_nicho  IS NULL OR va.nicho        ILIKE '%' || p_nicho  || '%')
@@ -296,6 +313,17 @@ BEGIN
     LIMIT p_limit;
 END;
 $$;
+
+-- ============================================================
+-- MIGRACIÓN: Agregar estadísticas a tabla hooks existente
+-- (Si la tabla ya existe, ejecuta solo este bloque)
+-- ============================================================
+ALTER TABLE hooks ADD COLUMN IF NOT EXISTS reproducciones   BIGINT DEFAULT NULL;
+ALTER TABLE hooks ADD COLUMN IF NOT EXISTS me_gusta         BIGINT DEFAULT NULL;
+ALTER TABLE hooks ADD COLUMN IF NOT EXISTS comentarios      BIGINT DEFAULT NULL;
+ALTER TABLE hooks ADD COLUMN IF NOT EXISTS guardados        BIGINT DEFAULT NULL;
+ALTER TABLE hooks ADD COLUMN IF NOT EXISTS compartidos      BIGINT DEFAULT NULL;
+ALTER TABLE hooks ADD COLUMN IF NOT EXISTS stats_updated_at TIMESTAMPTZ DEFAULT NULL;
 
 -- ============================================================
 -- PERMISOS: Desactiva RLS en estas tablas para acceso total
