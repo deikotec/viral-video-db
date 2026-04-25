@@ -11,14 +11,16 @@ PDF con 1,000 hooks virales
         ↓
   extract_pdf_data.py     → Extrae hooks + URLs de Instagram
         ↓
-  setup_database.py       → Crea BD SQLite con los 1,003 hooks
+  setup_supabase.py       → Genera SQL para crear tablas en Supabase
+        ↓
+  setup_database.py       → Sube los 1,003 hooks a Supabase
         ↓
   download_videos.py      → Descarga los videos con yt-dlp
         ↓
   analyze_with_gemini.py  → Analiza cada video: hook, tomas, guion,
                             música, estrategia viral, replicabilidad...
         ↓
-  viral_videos.db         → Base de datos con TODO el conocimiento viral
+  Supabase                → Base de datos en la nube con TODO el conocimiento viral
         ↓
   ┌─────────────────────────────────────────────────────┐
   │           3 FORMAS DE ACCEDER DESDE CUALQUIER IA    │
@@ -42,7 +44,8 @@ rrss ideas/
 ├── 📄 1,000 Viral Hooks (PBL).pdf      → PDF fuente
 ├── ⚙️  config.py                        → API keys y configuración
 ├── 🔧 extract_pdf_data.py               → Extractor del PDF
-├── 🗄️  setup_database.py                → Inicializador de la BD
+├── 🗄️  setup_supabase.py                → Inicializador SQL para Supabase
+├── 🗄️  setup_database.py                → Migra hooks a Supabase
 ├── ⬇️  download_videos.py               → Descargador de videos
 ├── 🤖 analyze_with_gemini.py            → Analizador con Gemini AI
 ├── 💡 generate_video_idea.py            → Generador CLI (uso local)
@@ -60,7 +63,7 @@ rrss ideas/
 ├── 🔧 claude_desktop_config.json        → Config lista para Claude
 ├── 📋 requirements.txt                  → Dependencias Python
 ├── 📊 hooks_data.json                   → 1,003 hooks extraídos
-├── 🗄️  viral_videos.db                  → Base de datos SQLite
+├── 🗄️  .env                             → Credenciales de Supabase y Gemini
 └── 📁 videos/                           → Videos descargados
 ```
 
@@ -75,7 +78,11 @@ pip install -r requirements.txt
 # 2. Configurar tu API key de Gemini en config.py
 # Obtén tu key GRATIS en: https://aistudio.google.com/app/apikey
 
-# 3. Inicializar la base de datos
+# 3. Inicializar la base de datos en Supabase
+# Primero obtén el SQL para crear las tablas:
+python setup_supabase.py
+# (Ejecuta el SQL en el dashboard de Supabase)
+# Luego sube los hooks:
 python setup_database.py
 
 # 4. Descargar los primeros 10 videos y analizarlos
@@ -329,11 +336,15 @@ python extract_pdf_data.py
 # → Genera hooks_data.json con 1,003 hooks
 ```
 
-### PASO 2: Inicializar BD
+### PASO 2: Inicializar BD en Supabase
 
 ```bash
+# 1. Obtener SQL para Supabase y ejecutarlo en el SQL Editor
+python setup_supabase.py
+
+# 2. Subir los datos iniciales
 python setup_database.py
-# → Crea viral_videos.db
+# → Importa los hooks a tu proyecto de Supabase
 ```
 
 ### PASO 3: Descargar videos
@@ -420,13 +431,12 @@ uvicorn api.main:app --port 8000
 
 ---
 
-## 📊 Estructura de la base de datos
+## 📊 Estructura de la base de datos (Supabase / PostgreSQL)
 
 ```sql
 hooks           → 1,003 hooks virales + URL de referencia
 video_analysis  → Análisis completo de cada video (hook, tomas, guion, viral...)
 ideas_generadas → Historial de todos los guiones generados
-hooks_fts       → Índice full-text para búsquedas semánticas rápidas
 ```
 
 ---
